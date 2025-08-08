@@ -1,0 +1,14 @@
+<!doctype html>
+<html><head><meta charset="utf-8"/><title>Matches – Gameday Recruiting</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}"></head>
+<body>
+<header><h1>Matches for {{ player.name }}</h1><a href="{{ url_for('index') }}">&larr; Back</a></header>
+<section class="card"><h3>Top Results</h3>
+<div class="table"><div class="row header"><div>School</div><div>Division</div><div>Region</div><div>Min GPA</div><div>City/State</div><div>Score</div><div>Outreach</div></div>
+{% for r in results %}<div class="row">
+<div><strong>{{ r.school_name }}</strong></div>
+<div>{{ r.division }}</div><div>{{ r.region }}</div><div>{{ r.min_gpa }}</div>
+<div>{{ r.city }}, {{ r.state }}</div><div><strong>{{ r.match_score }}%</strong></div>
+<div>{% if r.mailto %}<a href="{{ r.mailto }}" class="btn">Email {{ r.coach_name }}</a>{% else %}<span class="muted">No coach email</span>{% endif %}</div>
+</div>{% endfor %}
+</div></section></body></html>

@@ -1,0 +1,12 @@
+<!doctype html>
+<html><head><meta charset="utf-8"/><title>Admin Login</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}"></head>
+<body><header><h1>Admin Login</h1></header>
+<form method="post" class="card small">
+<label>Password <input type="password" name="password" required></label>
+<button type="submit">Login</button>
+</form>
+{% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}
+<div class="flash">{% for category, message in messages %}<div>{{ message }}</div>{% endfor %}</div>
+{% endif %}{% endwith %}
+</body></html>

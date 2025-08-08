@@ -1,0 +1,16 @@
+<!doctype html>
+<html><head><meta charset="utf-8"/><title>Gameday Baseball Recruiting Matchmaker</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}"></head>
+<body>
+<header><img src="{{ url_for('static', filename='Gameday_2020_Script-01 (2).png') }}" class="logo" onerror="this.style.display='none'"><h1>Gameday Baseball Recruiting Matchmaker</h1></header>
+<form method="post" class="card"><div class="grid">
+<label>Player Name <input name="name" required></label>
+<label>GPA <input name="gpa" type="number" step="0.01" min="0" max="4.5" required></label>
+<label>SAT (optional) <input name="sat" type="number" step="10" min="200" max="1600"></label>
+<label>Preferred Region <select name="region"><option value="">(Any)</option>{% for r in regions %}<option value="{{r}}">{{r}}</option>{% endfor %}</select></label>
+<label>Preferred Division <select name="division"><option value="">(Any)</option>{% for d in divisions %}<option value="{{d}}">{{d}}</option>{% endfor %}</select></label>
+<label>Intended Major <input name="major" placeholder="e.g., Business"></label>
+<label>Hudl/Video Link <input name="video_link" type="url" placeholder="https://..."></label>
+</div><button type="submit">Find Matches</button></form>
+<footer>© Gameday Baseball</footer>
+</body></html>

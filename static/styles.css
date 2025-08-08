@@ -1,0 +1,18 @@
+*{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,'Helvetica Neue',Arial}
+body{margin:0;background:#0b0f1a;color:#eef1f6}
+header{padding:24px 20px;background:#11162a;border-bottom:1px solid #1f2a44;display:flex;gap:16px;align-items:center}
+h1{margin:0;font-size:24px}
+.logo{height:36px}
+.card{background:#121a33;border:1px solid #223055;border-radius:12px;padding:16px;margin:20px}
+.card.small{max-width:520px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(200px,1fr));gap:12px}
+label{display:flex;flex-direction:column;font-size:14px;gap:6px}
+input,select{padding:10px;border-radius:8px;border:1px solid #2f406b;background:#0c1430;color:#eef1f6}
+button,.btn{padding:10px 14px;border-radius:10px;border:1px solid #2f406b;background:#1a2b57;color:#eef1f6;text-decoration:none;display:inline-block}
+button:hover,.btn:hover{background:#223b7a}
+.table{display:grid}
+.row{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr 0.7fr 1.2fr;gap:10px;padding:10px;border-bottom:1px solid #203058}
+.row.header{font-weight:700;background:#0e1733;border-top-left-radius:8px;border-top-right-radius:8px}
+.flash{margin:20px;color:#ffcf70}
+.muted{opacity:0.6}
+footer{padding:16px 20px;opacity:0.6}

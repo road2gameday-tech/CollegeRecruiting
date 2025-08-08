@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: gameday-recruiting-matchmaker
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn -b 0.0.0.0:$PORT app:app
+    envVars:
+      - key: FLASK_SECRET_KEY
+        value: change_me_now
+      - key: SUBMISSION_TO
+        value: road2gameday@gmail.com

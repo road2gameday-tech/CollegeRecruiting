@@ -1,0 +1,15 @@
+<!doctype html>
+<html><head><meta charset="utf-8"/><title>Admin Panel</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}"></head>
+<body><header><h1>Admin Panel</h1></header>
+<section class="card small">
+<a class="btn" href="{{ url_for('admin_export') }}">Export Current CSV</a>
+<form action="{{ url_for('admin_upload') }}" method="post" enctype="multipart/form-data" style="margin-top:1rem;">
+<label>Upload New CSV<input type="file" name="file" accept=".csv" required></label>
+<button type="submit">Replace</button>
+</form>
+</section>
+{% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}
+<div class="flash">{% for category, message in messages %}<div>{{ message }}</div>{% endfor %}</div>
+{% endif %}{% endwith %}
+</body></html>
