@@ -25,43 +25,79 @@ SUBMISSION_TO = os.environ.get("SUBMISSION_TO", "road2gameday@gmail.com")
 DIVISIONS = ["D1", "D2", "D3", "NAIA", "JUCO"]
 REGIONS = ["West", "Southwest", "Midwest", "South", "Southeast", "Northeast", "Central", "Mid-Atlantic", "Pacific"]
 
+def _norm(s: str) -> str:
+    return (s or "").strip().lower()
+
 def load_colleges():
+    """Read CSV case-insensitively and map common header variants to our keys."""
+    def first_match(row, *candidates):
+        # exact first
+        for c in candidates:
+            if c in row and row[c]:
+                return str(row[c]).strip()
+        # case-insensitive
+        lower = {k.lower(): v for k, v in row.items()}
+        for c in candidates:
+            v = lower.get(c.lower())
+            if v:
+                return str(v).strip()
+        return ""
+
     rows = []
-    with open(DATA_PATH, newline='', encoding='utf-8') as f:
+    with open(DATA_PATH, newline='', encoding='utf-8', errors='ignore') as f:
         reader = csv.DictReader(f)
-        for r in reader:
-            # Normalize fields
-            r['division'] = (r.get('division') or '').strip()
+        for raw in reader:
+            school_name = first_match(raw, "school_name", "school", "college", "university", "program", "institution", "team")
+            division    = first_match(raw, "division", "level", "ncaa_division", "assoc", "association", "league")
+            region      = first_match(raw, "region", "geo", "geography", "area", "territory")
+            city        = first_match(raw, "city", "town")
+            state       = first_match(raw, "state", "st", "province")
+            coach_name  = first_match(raw, "coach_name", "head_coach", "coach", "contact_name", "recruiting_coordinator", "assistant_coach")
+            coach_email = first_match(raw, "coach_email", "email", "coach email", "head_coach_email", "contact_email", "recruiting_email", "assistant_email", "primary_email")
+            min_gpa     = first_match(raw, "min_gpa", "minimum_gpa", "gpa_min", "gpa_requirement", "gpa")
+            majors      = first_match(raw, "majors", "programs", "fields_of_study", "degree_programs")
+
+            # Normalize division to our set
             div_map = {
-                'NCAA D1': 'D1', 'NCAA Division I': 'D1', 'Division I': 'D1',
-                'NCAA D2': 'D2', 'NCAA Division II': 'D2', 'Division II': 'D2',
-                'NCAA D3': 'D3', 'NCAA Division III': 'D3', 'Division III': 'D3'
+                "ncaa d1": "D1", "ncaa division i": "D1", "division i": "D1", "d1": "D1", "div i": "D1",
+                "ncaa d2": "D2", "ncaa division ii": "D2", "division ii": "D2", "d2": "D2", "div ii": "D2",
+                "ncaa d3": "D3", "ncaa division iii": "D3", "division iii": "D3", "d3": "D3", "div iii": "D3",
+                "naia": "NAIA", "juco": "JUCO", "njcaa": "JUCO"
             }
-            r['division'] = div_map.get(r['division'], r['division'])
-            r['region'] = (r.get('region') or '').strip()
-            r['majors'] = r.get('majors') or ''
-            rows.append(r)
+            div_norm = div_map.get(_norm(division), division.strip())
+
+            rows.append({
+                "school_name": school_name,
+                "division": div_norm,
+                "region": region,
+                "city": city,
+                "state": state,
+                "coach_name": coach_name,
+                "coach_email": coach_email,
+                "min_gpa": min_gpa or "0",
+                "majors": majors or "",
+            })
     return rows
 
 def compute_match_score(player, row):
     score = 0.0
     weights = {"division": 0.35, "region": 0.25, "academics": 0.25, "major": 0.15}
-    if player['division'] and row['division'].lower() == player['division'].lower():
+    if player['division'] and _norm(row['division']) == _norm(player['division']):
         score += weights["division"]
-    if player['region'] and row['region'].lower() == player['region'].lower():
+    if player['region'] and _norm(row['region']) == _norm(player['region']):
         score += weights["region"]
     try:
         min_gpa = float(row.get('min_gpa') or 0)
-    except ValueError:
+    except (ValueError, TypeError):
         min_gpa = 0.0
     try:
         gpa = float(player.get('gpa') or 0)
-    except ValueError:
+    except (ValueError, TypeError):
         gpa = 0.0
     if gpa >= min_gpa:
         diff = max(0.0, min(gpa - min_gpa, 1.0))
         score += weights["academics"] * (0.6 + 0.4 * diff)
-    majors = [m.strip().lower() for m in row['majors'].split("|") if m.strip()]
+    majors = [m.strip().lower() for m in (row.get('majors') or '').split("|") if m.strip()]
     intended_major = (player.get('major') or '').strip().lower()
     if intended_major and intended_major in majors:
         score += weights["major"]
@@ -109,14 +145,23 @@ def index():
         }
         send_submission_email(player)
 
-        rows = load_colleges()
-        # Filter by division & region
-        if player["division"]:
-            rows = [r for r in rows if r['division'].lower() == player['division'].lower()]
-        if player["region"]:
-            rows = [r for r in rows if r['region'].lower() == player['region'].lower()]
+        all_rows = load_colleges()
+        rows = list(all_rows)
 
-        # Compute scores & mailto
+        # Progressive filtering: only keep a filter if it yields matches
+        if player["division"]:
+            filtered = [r for r in rows if _norm(r.get("division")) == _norm(player["division"])]
+            if filtered:
+                rows = filtered
+        if player["region"]:
+            filtered = [r for r in rows if _norm(r.get("region")) == _norm(player["region"])]
+            if filtered:
+                rows = filtered
+
+        if not rows:  # fall back to all if both filters wiped everything
+            rows = all_rows
+
+        # Score + mailto
         for r in rows:
             r['match_score'] = compute_match_score(player, r)
             email = (r.get("coach_email") or "").strip()
@@ -143,9 +188,8 @@ Thank you for your time,
             except EmailNotValidError:
                 r['mailto'] = None
 
-        # Sort by match_score
-        rows.sort(key=lambda x: x['match_score'], reverse=True)
-        return render_template("results.html", player=player, results=rows)
+        rows.sort(key=lambda x: x.get('match_score', 0), reverse=True)
+        return render_template("results.html", player=player, results=rows[:200])
 
     return render_template("index.html", divisions=DIVISIONS, regions=REGIONS)
 
