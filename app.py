@@ -14,9 +14,11 @@ load_dotenv()
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'dev_key_change_me')
 
+# Data + admin
 DATA_PATH = os.path.join(os.path.dirname(__file__), "data", "college_baseball_programs_merged_1000.csv")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "Gameday2025!!")
 
+# Email (optional server-side)
 SMTP_HOST = os.environ.get("SMTP_HOST")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USER = os.environ.get("SMTP_USER")
@@ -24,8 +26,9 @@ SMTP_PASS = os.environ.get("SMTP_PASS")
 SMTP_FROM = os.environ.get("SMTP_FROM")
 SUBMISSION_TO = os.environ.get("SUBMISSION_TO", "road2gameday@gmail.com")
 
+# UI lists
 DIVISIONS = ["D1", "D2", "D3", "NAIA", "JUCO"]
-REGIONS = ["West", "Southwest", "Midwest", "South", "Southeast", "Northeast", "Central", "Mid-Atlantic", "Pacific"]
+REGIONS = ["West", "Southwest", "Midwest", "South", "Southeast", "Northeast", "Central", "Mid-Atlantic", "Pacific"]  # no Rockies
 
 # ---------- helpers ----------
 def _norm(s: str) -> str:
@@ -37,7 +40,7 @@ NAME_HINTS = (
 )
 
 def _parse_location(loc: str):
-    """Parse 'City, State (Region)' or 'City, State'."""
+    """Parse 'City, State (Region)' or 'City, State' -> (city, state, region)."""
     loc = (loc or "").strip()
     if not loc:
         return "", "", ""
@@ -60,7 +63,7 @@ def _first_match(row, *cands):
     return ""
 
 def _derive_school_name(row):
-    """Heuristic: scan all values and pick the best-looking school name."""
+    """Heuristic: scan all values and pick the most school-like string."""
     best = ""
     for _, v in row.items():
         val = str(v or "").strip()
@@ -74,16 +77,19 @@ def _derive_school_name(row):
     return best
 
 def _parse_min_gpa(value):
-    """Extract a float like 3.2 from strings such as '>=3.2', '3.0 preferred', 'approx 3.5+'."""
+    """
+    Extract a float like 3.2 from strings such as '>=3.2', '3.0 preferred', 'approx 3.5+'.
+    Return None if not present.
+    """
     s = str(value or "").strip()
     m = re.search(r"(\d+(?:\.\d+)?)", s)
     if not m:
-        return 0.0
+        return None
     try:
         g = float(m.group(1))
-        return g if 0.0 <= g <= 5.0 else 0.0
+        return g if 0.0 <= g <= 5.0 else None
     except ValueError:
-        return 0.0
+        return None
 
 # ---------- data loader ----------
 def load_colleges():
@@ -109,16 +115,27 @@ def load_colleges():
             }
             division = div_map.get(_norm(division), (division or "").strip())
 
-            # REGION / CITY / STATE (accept combined "location")
+            # REGION / CITY / STATE (accept combined fields)
             region   = _first_match(raw, "region", "geo", "geography", "area", "territory")
             location = _first_match(raw, "location", "city_state", "city_state_region", "school_location")
             city     = _first_match(raw, "city", "town")
             state    = _first_match(raw, "state", "st", "province")
+
+            # If REGION looks like "City, State (Region)", unpack it
+            if region and (("," in region) or ("(" in region and ")" in region)):
+                c2, s2, r2 = _parse_location(region)
+                if c2 or s2 or r2:
+                    city = city or c2
+                    state = state or s2
+                    region = r2 or region  # prefer parsed region if available
+
+            # If still missing city/state and we have a separate location field, unpack it
             if (not city or not state) and location:
                 c2, s2, r2 = _parse_location(location)
                 city = city or c2
                 state = state or s2
-                region = region or r2
+                if not region:
+                    region = r2
 
             # COACH / EMAIL
             coach_name  = _first_match(
@@ -130,13 +147,15 @@ def load_colleges():
                 "recruiting_email", "assistant_email", "primary_email"
             )
 
-            # MIN GPA
+            # MIN GPA (many variants, parsed to float or None)
             min_gpa_raw = _first_match(
-                raw, "min_gpa", "minimum_gpa", "gpa_min", "gpa_requirement",
-                "preferred_gpa", "academic_floor", "acad_floor", "gpa"
+                raw, "min_gpa", "minimum_gpa", "gpa_min", "gpa_requirement", "preferred_gpa",
+                "academic_floor", "acad_floor", "gpa floor", "min. gpa", "min gpa",
+                "req_gpa", "required_gpa", "admissions_gpa", "avg_gpa", "average_gpa", "gpa"
             )
             min_gpa = _parse_min_gpa(min_gpa_raw)
 
+            # MAJORS
             majors = _first_match(raw, "majors", "programs", "fields_of_study", "degree_programs")
 
             rows.append({
@@ -147,7 +166,7 @@ def load_colleges():
                 "state": state,
                 "coach_name": coach_name,
                 "coach_email": coach_email,
-                "min_gpa": min_gpa,
+                "min_gpa": min_gpa,   # <- keep None if missing
                 "majors": majors or "",
             })
     return rows
@@ -167,9 +186,11 @@ def compute_match_score(player, row):
     except (ValueError, TypeError):
         gpa = 0.0
 
-    min_gpa = float(row.get('min_gpa') or 0.0)
-    if gpa >= min_gpa:
-        diff = max(0.0, min(gpa - min_gpa, 1.0))
+    # Treat None as 0 for the comparison
+    min_gpa_val = row.get('min_gpa')
+    min_gpa_num = float(min_gpa_val) if isinstance(min_gpa_val, (int, float)) else 0.0
+    if gpa >= min_gpa_num:
+        diff = max(0.0, min(gpa - min_gpa_num, 1.0))
         score += weights["academics"] * (0.6 + 0.4 * diff)
 
     majors = [m.strip().lower() for m in (row.get('majors') or '').split("|") if m.strip()]
@@ -180,6 +201,7 @@ def compute_match_score(player, row):
     return round(score * 100, 2)
 
 def send_submission_email(player):
+    # Optional server-side email of player submissions
     if not all([SMTP_HOST, SMTP_USER, SMTP_PASS, SMTP_FROM]):
         return False, "SMTP not configured; skipped server-side email."
     try:
@@ -225,7 +247,7 @@ def index():
         all_rows = load_colleges()
         rows = list(all_rows)
 
-        # Progressive filtering
+        # Progressive filtering: only keep a filter if it yields matches
         if player["division"]:
             f_div = [r for r in rows if _norm(r.get("division")) == _norm(player["division"])]
             if f_div:
@@ -236,7 +258,7 @@ def index():
                 rows = f_reg
 
         if not rows:
-            rows = all_rows
+            rows = all_rows  # show something, still ranked by match
 
         # Score + mailto
         for r in rows:
