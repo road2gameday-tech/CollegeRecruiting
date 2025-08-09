@@ -56,14 +56,14 @@
         <div><strong>{{ r.school_name or '—' }}</strong></div>
         <div>{{ r.division or '—' }}</div>
         <div>{{ r.region or '—' }}</div>
-        <div>
-          {% set mg = r.min_gpa %}
-          {% if mg is number %}
-            {{ ('%.2f' % mg).rstrip('0').rstrip('.') }}
-          {% else %}
-            {{ mg or '—' }}
-          {% endif %}
-        </div>
+<div>
+  {% set mg = r.min_gpa %}
+  {% if mg is not none %}
+    {{ ('%.2f' % mg).rstrip('0').rstrip('.') }}
+  {% else %}
+    —
+  {% endif %}
+</div>
         <div>
           {% set city = r.city or '' %}
           {% set state = r.state or '' %}
