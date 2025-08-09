@@ -1,8 +1,10 @@
 import os
 import smtplib
 import csv
+import re
 from email.message import EmailMessage
 from urllib.parse import quote
+
 from dotenv import load_dotenv
 from flask import Flask, render_template, request, redirect, url_for, send_file, session, flash
 from email_validator import validate_email, EmailNotValidError
@@ -12,11 +14,9 @@ load_dotenv()
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'dev_key_change_me')
 
-# Data + admin
 DATA_PATH = os.path.join(os.path.dirname(__file__), "data", "college_baseball_programs_merged_1000.csv")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "Gameday2025!!")
 
-# Email (optional server-side submission email)
 SMTP_HOST = os.environ.get("SMTP_HOST")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USER = os.environ.get("SMTP_USER")
@@ -24,99 +24,135 @@ SMTP_PASS = os.environ.get("SMTP_PASS")
 SMTP_FROM = os.environ.get("SMTP_FROM")
 SUBMISSION_TO = os.environ.get("SUBMISSION_TO", "road2gameday@gmail.com")
 
-# UI lists
 DIVISIONS = ["D1", "D2", "D3", "NAIA", "JUCO"]
-REGIONS = ["West", "Southwest", "Midwest", "South", "Southeast", "Northeast", "Central", "Mid-Atlantic", "Pacific"]  # no Rockies
+REGIONS = ["West", "Southwest", "Midwest", "South", "Southeast", "Northeast", "Central", "Mid-Atlantic", "Pacific"]
 
+# ---------- helpers ----------
 def _norm(s: str) -> str:
     return (s or "").strip().lower()
 
-def load_colleges():
-    """Read CSV case-insensitively and map common header variants to our keys.
-       Also parses a single Location field like 'City, State (Region)'. """
-    import re
+NAME_HINTS = (
+    "university", "college", "state", "tech", "institute", "polytechnic",
+    "community", "cc", "academy", "school"
+)
 
-    def first_match(row, *candidates):
-        # exact
-        for c in candidates:
-            if c in row and row[c]:
-                return str(row[c]).strip()
-        # case-insensitive
-        lower = {k.lower(): v for k, v in row.items()}
-        for c in candidates:
-            v = lower.get(c.lower())
-            if v:
-                return str(v).strip()
-        return ""
-
-    def parse_location(loc: str):
-        """Parse 'City, State (Region)' or 'City, State' into parts."""
-        loc = (loc or "").strip()
-        if not loc:
-            return "", "", ""
-        m = re.match(r"^\s*([^,]+)\s*,\s*([^(]+?)(?:\s*\(([^)]+)\))?\s*$", loc)
-        if m:
-            city = m.group(1).strip()
-            state = m.group(2).strip()
-            region = (m.group(3) or "").strip()
-            return city, state, region
+def _parse_location(loc: str):
+    """Parse 'City, State (Region)' or 'City, State'."""
+    loc = (loc or "").strip()
+    if not loc:
         return "", "", ""
+    m = re.match(r"^\s*([^,]+)\s*,\s*([^(]+?)(?:\s*\(([^)]+)\))?\s*$", loc)
+    if m:
+        return m.group(1).strip(), m.group(2).strip(), (m.group(3) or "").strip()
+    return "", "", ""
 
+def _first_match(row, *cands):
+    # exact
+    for c in cands:
+        if c in row and row[c]:
+            return str(row[c]).strip()
+    # case-insensitive
+    lower = {k.lower(): v for k, v in row.items()}
+    for c in cands:
+        v = lower.get(c.lower())
+        if v:
+            return str(v).strip()
+    return ""
+
+def _derive_school_name(row):
+    """Heuristic: scan all values and pick the best-looking school name."""
+    best = ""
+    for _, v in row.items():
+        val = str(v or "").strip()
+        if not val:
+            continue
+        low = val.lower()
+        if any(h in low for h in NAME_HINTS) and len(val) >= len(best):
+            if "@" in val or val.startswith("http"):
+                continue
+            best = val
+    return best
+
+def _parse_min_gpa(value):
+    """Extract a float like 3.2 from strings such as '>=3.2', '3.0 preferred', 'approx 3.5+'."""
+    s = str(value or "").strip()
+    m = re.search(r"(\d+(?:\.\d+)?)", s)
+    if not m:
+        return 0.0
+    try:
+        g = float(m.group(1))
+        return g if 0.0 <= g <= 5.0 else 0.0
+    except ValueError:
+        return 0.0
+
+# ---------- data loader ----------
+def load_colleges():
     rows = []
     with open(DATA_PATH, newline='', encoding='utf-8', errors='ignore') as f:
         reader = csv.DictReader(f)
         for raw in reader:
-            school_name = first_match(
+            # SCHOOL NAME (many variants + heuristic fallback)
+            school_name = _first_match(
                 raw, "school_name", "school", "name", "college", "college_name",
                 "university", "university_name", "institution", "program", "team", "program_name"
             )
-            division    = first_match(raw, "division", "level", "ncaa_division", "assoc", "association", "league")
-            region      = first_match(raw, "region", "geo", "geography", "area", "territory")
-            location    = first_match(raw, "location", "city_state", "city_state_region", "school_location")
+            if not school_name:
+                school_name = _derive_school_name(raw)
 
-            city        = first_match(raw, "city", "town")
-            state       = first_match(raw, "state", "st", "province")
-
-            # Unpack a combined location if needed
-            if (not city or not state) and location:
-                c2, s2, r2 = parse_location(location)
-                city = city or c2
-                state = state or s2
-                region = region or r2
-
-            coach_name  = first_match(
-                raw, "coach_name", "head_coach", "coach", "contact_name",
-                "recruiting_coordinator", "assistant_coach"
-            )
-            coach_email = first_match(
-                raw, "coach_email", "email", "coach email", "head_coach_email", "contact_email",
-                "recruiting_email", "assistant_email", "primary_email"
-            )
-            min_gpa     = first_match(raw, "min_gpa", "minimum_gpa", "gpa_min", "gpa_requirement", "gpa")
-            majors      = first_match(raw, "majors", "programs", "fields_of_study", "degree_programs")
-
-            # Normalize division
+            # DIVISION
+            division = _first_match(raw, "division", "level", "ncaa_division", "assoc", "association", "league")
             div_map = {
                 "ncaa d1": "D1", "ncaa division i": "D1", "division i": "D1", "d1": "D1", "div i": "D1",
                 "ncaa d2": "D2", "ncaa division ii": "D2", "division ii": "D2", "d2": "D2", "div ii": "D2",
                 "ncaa d3": "D3", "ncaa division iii": "D3", "division iii": "D3", "d3": "D3", "div iii": "D3",
                 "naia": "NAIA", "juco": "JUCO", "njcaa": "JUCO"
             }
-            div_norm = div_map.get(_norm(division), (division or "").strip())
+            division = div_map.get(_norm(division), (division or "").strip())
+
+            # REGION / CITY / STATE (accept combined "location")
+            region   = _first_match(raw, "region", "geo", "geography", "area", "territory")
+            location = _first_match(raw, "location", "city_state", "city_state_region", "school_location")
+            city     = _first_match(raw, "city", "town")
+            state    = _first_match(raw, "state", "st", "province")
+            if (not city or not state) and location:
+                c2, s2, r2 = _parse_location(location)
+                city = city or c2
+                state = state or s2
+                region = region or r2
+
+            # COACH / EMAIL
+            coach_name  = _first_match(
+                raw, "coach_name", "head_coach", "coach", "contact_name",
+                "recruiting_coordinator", "assistant_coach"
+            )
+            coach_email = _first_match(
+                raw, "coach_email", "email", "coach email", "head_coach_email", "contact_email",
+                "recruiting_email", "assistant_email", "primary_email"
+            )
+
+            # MIN GPA
+            min_gpa_raw = _first_match(
+                raw, "min_gpa", "minimum_gpa", "gpa_min", "gpa_requirement",
+                "preferred_gpa", "academic_floor", "acad_floor", "gpa"
+            )
+            min_gpa = _parse_min_gpa(min_gpa_raw)
+
+            majors = _first_match(raw, "majors", "programs", "fields_of_study", "degree_programs")
 
             rows.append({
                 "school_name": school_name,
-                "division": div_norm,
+                "division": division,
                 "region": region,
                 "city": city,
                 "state": state,
                 "coach_name": coach_name,
                 "coach_email": coach_email,
-                "min_gpa": min_gpa or "0",
+                "min_gpa": min_gpa,
                 "majors": majors or "",
             })
     return rows
 
+# ---------- scoring ----------
 def compute_match_score(player, row):
     score = 0.0
     weights = {"division": 0.35, "region": 0.25, "academics": 0.25, "major": 0.15}
@@ -127,14 +163,11 @@ def compute_match_score(player, row):
         score += weights["region"]
 
     try:
-        min_gpa = float(row.get('min_gpa') or 0)
-    except (ValueError, TypeError):
-        min_gpa = 0.0
-    try:
         gpa = float(player.get('gpa') or 0)
     except (ValueError, TypeError):
         gpa = 0.0
 
+    min_gpa = float(row.get('min_gpa') or 0.0)
     if gpa >= min_gpa:
         diff = max(0.0, min(gpa - min_gpa, 1.0))
         score += weights["academics"] * (0.6 + 0.4 * diff)
@@ -147,7 +180,6 @@ def compute_match_score(player, row):
     return round(score * 100, 2)
 
 def send_submission_email(player):
-    # Optional server-side email of player submissions
     if not all([SMTP_HOST, SMTP_USER, SMTP_PASS, SMTP_FROM]):
         return False, "SMTP not configured; skipped server-side email."
     try:
@@ -175,6 +207,7 @@ Hudl/Video: {player.get('video_link')}
     except Exception as e:
         return False, f"Email error: {e}"
 
+# ---------- routes ----------
 @app.route("/", methods=["GET", "POST"])
 def index():
     if request.method == "POST":
@@ -192,7 +225,7 @@ def index():
         all_rows = load_colleges()
         rows = list(all_rows)
 
-        # Progressive filtering: only keep a filter if it yields matches
+        # Progressive filtering
         if player["division"]:
             f_div = [r for r in rows if _norm(r.get("division")) == _norm(player["division"])]
             if f_div:
@@ -203,7 +236,7 @@ def index():
                 rows = f_reg
 
         if not rows:
-            rows = all_rows  # show something, still ranked by match
+            rows = all_rows
 
         # Score + mailto
         for r in rows:
@@ -228,12 +261,12 @@ I would appreciate any guidance on your evaluation process and upcoming opportun
 Thank you for your time,
 {player['name']}
 """
-                r['mailto'] = f"mailto:{email}?subject={quote(subject)}&body={quote(body)}"
             except EmailNotValidError:
                 r['mailto'] = None
+            else:
+                r['mailto'] = f"mailto:{email}?subject={quote(subject)}&body={quote(body)}"
 
         rows.sort(key=lambda x: x.get('match_score', 0), reverse=True)
-        # Note: the template label changed from "Score" to "Best Match"; values stay the same.
         return render_template("results.html", player=player, results=rows[:200])
 
     return render_template("index.html", divisions=DIVISIONS, regions=REGIONS)
@@ -260,7 +293,6 @@ def admin_panel():
 def admin_export():
     if not session.get("admin"):
         return redirect(url_for("admin_login"))
-    # keep filename 'colleges.csv' for the download UX
     return send_file(DATA_PATH, as_attachment=True, download_name="colleges.csv")
 
 @app.route("/admin/upload", methods=["POST"])
