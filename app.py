@@ -14,11 +14,10 @@ load_dotenv()
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'dev_key_change_me')
 
-# Data + admin
+# Paths / config
 DATA_PATH = os.path.join(os.path.dirname(__file__), "data", "college_baseball_programs_merged_1000.csv")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "Gameday2025!!")
 
-# Email (optional server-side)
 SMTP_HOST = os.environ.get("SMTP_HOST")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USER = os.environ.get("SMTP_USER")
@@ -26,7 +25,6 @@ SMTP_PASS = os.environ.get("SMTP_PASS")
 SMTP_FROM = os.environ.get("SMTP_FROM")
 SUBMISSION_TO = os.environ.get("SUBMISSION_TO", "road2gameday@gmail.com")
 
-# UI lists
 DIVISIONS = ["D1", "D2", "D3", "NAIA", "JUCO"]
 REGIONS = ["West", "Southwest", "Midwest", "South", "Southeast", "Northeast", "Central", "Mid-Atlantic", "Pacific"]  # no Rockies
 
@@ -77,10 +75,7 @@ def _derive_school_name(row):
     return best
 
 def _parse_min_gpa(value):
-    """
-    Extract a float like 3.2 from strings such as '>=3.2', '3.0 preferred', 'approx 3.5+'.
-    Return None if not present.
-    """
+    """Extract a float like 3.2 from '>=3.2', '3.0 preferred', etc. Return None if missing."""
     s = str(value or "").strip()
     m = re.search(r"(\d+(?:\.\d+)?)", s)
     if not m:
@@ -90,6 +85,38 @@ def _parse_min_gpa(value):
         return g if 0.0 <= g <= 5.0 else None
     except ValueError:
         return None
+
+# --- US state helpers for city/state guessing ---
+US_STATES = {
+    "AL":"Alabama","AK":"Alaska","AZ":"Arizona","AR":"Arkansas","CA":"California","CO":"Colorado",
+    "CT":"Connecticut","DE":"Delaware","FL":"Florida","GA":"Georgia","HI":"Hawaii","ID":"Idaho",
+    "IL":"Illinois","IN":"Indiana","IA":"Iowa","KS":"Kansas","KY":"Kentucky","LA":"Louisiana",
+    "ME":"Maine","MD":"Maryland","MA":"Massachusetts","MI":"Michigan","MN":"Minnesota","MS":"Mississippi",
+    "MO":"Missouri","MT":"Montana","NE":"Nebraska","NV":"Nevada","NH":"New Hampshire","NJ":"New Jersey",
+    "NM":"New Mexico","NY":"New York","NC":"North Carolina","ND":"North Dakota","OH":"Ohio","OK":"Oklahoma",
+    "OR":"Oregon","PA":"Pennsylvania","RI":"Rhode Island","SC":"South Carolina","SD":"South Dakota",
+    "TN":"Tennessee","TX":"Texas","UT":"Utah","VT":"Vermont","VA":"Virginia","WA":"Washington",
+    "WV":"West Virginia","WI":"Wisconsin","WY":"Wyoming","DC":"District of Columbia"
+}
+STATE_ABBRS = set(US_STATES.keys())
+STATE_NAMES = {name.lower(): abbr for abbr, name in US_STATES.items()}
+
+def _guess_city_state_from_row(raw):
+    """Scan any column for 'City, State' and return a best guess (City, ST)."""
+    for v in raw.values():
+        s = str(v or "").strip()
+        if not s or "@" in s or s.startswith("http"):
+            continue
+        city, state, _ = _parse_location(s)
+        if not city or not state:
+            continue
+        st_up = state.strip().upper()
+        st_norm = _norm(state)
+        if st_up in STATE_ABBRS:
+            return city, st_up
+        if st_norm in STATE_NAMES:
+            return city, STATE_NAMES[st_norm]
+    return "", ""
 
 # ---------- data loader ----------
 def load_colleges():
@@ -127,7 +154,7 @@ def load_colleges():
                 if c2 or s2 or r2:
                     city = city or c2
                     state = state or s2
-                    region = r2 or region  # prefer parsed region if available
+                    region = r2 or region
 
             # If still missing city/state and we have a separate location field, unpack it
             if (not city or not state) and location:
@@ -136,6 +163,12 @@ def load_colleges():
                 state = state or s2
                 if not region:
                     region = r2
+
+            # Final fallback: guess city/state from ANY column text
+            if not city or not state:
+                gc, gs = _guess_city_state_from_row(raw)
+                city = city or gc
+                state = state or gs
 
             # COACH / EMAIL
             coach_name  = _first_match(
@@ -166,7 +199,7 @@ def load_colleges():
                 "state": state,
                 "coach_name": coach_name,
                 "coach_email": coach_email,
-                "min_gpa": min_gpa,   # <- keep None if missing
+                "min_gpa": min_gpa,   # None if not present
                 "majors": majors or "",
             })
     return rows
@@ -186,7 +219,7 @@ def compute_match_score(player, row):
     except (ValueError, TypeError):
         gpa = 0.0
 
-    # Treat None as 0 for the comparison
+    # Treat None as 0 for comparison
     min_gpa_val = row.get('min_gpa')
     min_gpa_num = float(min_gpa_val) if isinstance(min_gpa_val, (int, float)) else 0.0
     if gpa >= min_gpa_num:
