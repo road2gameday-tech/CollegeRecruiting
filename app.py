@@ -102,20 +102,47 @@ STATE_ABBRS = set(US_STATES.keys())
 STATE_NAMES = {name.lower(): abbr for abbr, name in US_STATES.items()}
 
 def _guess_city_state_from_row(raw):
-    """Scan any column for 'City, State' and return a best guess (City, ST)."""
+    """
+    Scan any column for something that looks like City, ST or City, State
+    (optionally with ZIP or extra text) and return (City, ST).
+    """
+    def abbr_from(name_or_abbr: str):
+        up = name_or_abbr.strip().upper()
+        if up in STATE_ABBRS:
+            return up
+        low = name_or_abbr.strip().lower()
+        return STATE_NAMES.get(low, "")
+
+    patterns = [
+        r"(?P<city>[A-Za-z .'-]+),\s*(?P<st>[A-Z]{2})(?:\s*\d{5}(?:-\d{4})?)?",
+        r"(?P<city>[A-Za-z .'-]+),\s*(?P<state>[A-Za-z .'-]+)",
+    ]
+
     for v in raw.values():
         s = str(v or "").strip()
         if not s or "@" in s or s.startswith("http"):
             continue
-        city, state, _ = _parse_location(s)
-        if not city or not state:
-            continue
-        st_up = state.strip().upper()
-        st_norm = _norm(state)
-        if st_up in STATE_ABBRS:
-            return city, st_up
-        if st_norm in STATE_NAMES:
-            return city, STATE_NAMES[st_norm]
+
+        # try structured parse first
+        city, state_txt, _ = _parse_location(s)
+        if city and state_txt:
+            st = abbr_from(state_txt)
+            if st:
+                return city.strip(), st
+
+        # regex inside the string
+        for pat in patterns:
+            m = re.search(pat, s)
+            if not m:
+                continue
+            city = (m.groupdict().get("city") or "").strip()
+            st = m.groupdict().get("st")
+            if not st:
+                state_name = (m.groupdict().get("state") or "").strip()
+                st = abbr_from(state_name)
+            if city and st:
+                return city, st
+
     return "", ""
 
 # ---------- data loader ----------
@@ -145,8 +172,12 @@ def load_colleges():
             # REGION / CITY / STATE (accept combined fields)
             region   = _first_match(raw, "region", "geo", "geography", "area", "territory")
             location = _first_match(raw, "location", "city_state", "city_state_region", "school_location")
-            city     = _first_match(raw, "city", "town")
-            state    = _first_match(raw, "state", "st", "province")
+            city     = _first_match(raw,
+                        "city","town","campus_city","school_city","hq_city",
+                        "mailing_city","address_city","location_city")
+            state    = _first_match(raw,
+                        "state","st","province","campus_state","school_state","hq_state",
+                        "mailing_state","address_state","location_state")
 
             # If REGION looks like "City, State (Region)", unpack it
             if region and (("," in region) or ("(" in region and ")" in region)):
@@ -302,7 +333,7 @@ def index():
                 subject = f"Recruiting Interest: {player['name']} – {r.get('school_name','')} Baseball"
                 body = f"""Coach {r.get('coach_name','')},
 
-My name is {player['name']}. I'm interested in {r.get('school_name','')} ({r.get('division','')}) and would love to learn more about your program.
+My name is {r.get('school_name','')} ({r.get('division','')}) and would love to learn more about your program.
 
 Player Snapshot:
 • GPA: {player['gpa']}
