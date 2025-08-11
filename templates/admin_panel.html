@@ -7,10 +7,13 @@
   <style>
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:#e6e9ef; background:#0b1220; }
     .card { max-width: 720px; margin: 32px auto; padding: 20px; border:1px solid #1f2937; border-radius: 12px; background:#0f172a; }
-    .row { margin: 14px 0; }
+    .row { margin: 14px 0; display:flex; gap:12px; align-items:center; }
     .btn { padding:10px 14px; border-radius:10px; border:1px solid #334155; background:#111827; color:#e6e9ef; text-decoration:none; font-weight:600; }
     .btn:hover { background:#0b1220; }
     input[type=file] { width:100%; padding:10px; background:#0b1220; border:1px solid #1f2937; border-radius:10px; color:#e6e9ef; }
+    label { font-weight:600; display:block; margin-bottom:6px; }
+    hr { border:0; border-top:1px solid #1f2937; margin:18px 0; }
+    .muted { color:#9aa3ae; font-size:13px; }
   </style>
 </head>
 <body>
@@ -18,23 +21,21 @@
     <h2>Admin Panel</h2>
 
     <div class="row">
-      <a class="btn" href="{{ url_for('admin_export') }}">Export Current CSV</a>
-    </div>
-
-    <div class="row">
+      <a class="btn" href="{{ url_for('admin_export') }}">Download Current CSV</a>
+      {% if url_for('admin_audit_missing_location', _external=False) %}
       <a class="btn" href="{{ url_for('admin_audit_missing_location') }}">Download Missing City/State CSV</a>
+      {% endif %}
     </div>
 
-    <hr style="border-color:#1f2937; margin:18px 0;">
+    <hr>
 
     <form action="{{ url_for('admin_upload') }}" method="post" enctype="multipart/form-data">
-      <label>Upload New CSV</label>
+      <label>Upload New CSV (replaces current college list)</label>
       <div class="row">
-        <input type="file" name="file" accept=".csv">
+        <input type="file" name="file" accept=".csv" required>
+        <button class="btn" type="submit">Upload & Replace</button>
       </div>
-      <div class="row">
-        <button class="btn" type="submit">Replace</button>
-      </div>
+      <div class="muted">Expected path on server: <code>/data/college_baseball_programs_merged_1000.csv</code></div>
     </form>
   </div>
 </body>
