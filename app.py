@@ -414,23 +414,5 @@ def admin_audit_missing_location():
 
     return send_file(out_path, as_attachment=True, download_name="needs_location_cleanup.csv")
 
-
 if __name__ == "__main__":
     app.run(debug=True)
-@app.route("/admin/audit-missing-location")
-def admin_audit_missing_location():
-    if not session.get("admin"):
-        return redirect(url_for("admin_login"))
-    rows = load_colleges()
-    missing = [r for r in rows if not (r.get("city") and r.get("state"))]
-
-    out_path = os.path.join(os.path.dirname(__file__), "data", "needs_location_cleanup.csv")
-    import csv
-    with open(out_path, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=[
-            "school_name","division","region","city","state","coach_name","coach_email","min_gpa","majors"
-        ])
-        w.writeheader()
-        for r in missing:
-            w.writerow(r)
-    return send_file(out_path, as_attachment=True, download_name="needs_location_cleanup.csv")
