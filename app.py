@@ -416,3 +416,20 @@ def admin_audit_missing_location():
 
 if __name__ == "__main__":
     app.run(debug=True)
+    
+@app.route("/admin/upload", methods=["POST"])
+def admin_upload():
+    if not session.get("admin"):
+        return redirect(url_for("admin_login"))
+    file = request.files.get("file")
+    if not file or not file.filename:
+        flash("No file uploaded.", "error")
+        return redirect(url_for("admin_panel"))
+    # Basic CSV check
+    if not file.filename.lower().endswith(".csv"):
+        flash("Please upload a .csv file.", "error")
+        return redirect(url_for("admin_panel"))
+    # Save over the existing dataset
+    file.save(DATA_PATH)
+    flash("College list updated.", "success")
+    return redirect(url_for("admin_panel"))
