@@ -1,15 +1,41 @@
 <!doctype html>
-<html><head><meta charset="utf-8"/><title>Admin Panel</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}"></head>
-<body><header><h1>Admin Panel</h1></header>
-<section class="card small">
-<a class="btn" href="{{ url_for('admin_export') }}">Export Current CSV</a>
-<form action="{{ url_for('admin_upload') }}" method="post" enctype="multipart/form-data" style="margin-top:1rem;">
-<label>Upload New CSV<input type="file" name="file" accept=".csv" required></label>
-<button type="submit">Replace</button>
-</form>
-</section>
-{% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}
-<div class="flash">{% for category, message in messages %}<div>{{ message }}</div>{% endfor %}</div>
-{% endif %}{% endwith %}
-</body></html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Admin Panel — Gameday</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:#e6e9ef; background:#0b1220; }
+    .card { max-width: 720px; margin: 32px auto; padding: 20px; border:1px solid #1f2937; border-radius: 12px; background:#0f172a; }
+    .row { margin: 14px 0; }
+    .btn { padding:10px 14px; border-radius:10px; border:1px solid #334155; background:#111827; color:#e6e9ef; text-decoration:none; font-weight:600; }
+    .btn:hover { background:#0b1220; }
+    input[type=file] { width:100%; padding:10px; background:#0b1220; border:1px solid #1f2937; border-radius:10px; color:#e6e9ef; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Admin Panel</h2>
+
+    <div class="row">
+      <a class="btn" href="{{ url_for('admin_export') }}">Export Current CSV</a>
+    </div>
+
+    <div class="row">
+      <a class="btn" href="{{ url_for('admin_audit_missing_location') }}">Download Missing City/State CSV</a>
+    </div>
+
+    <hr style="border-color:#1f2937; margin:18px 0;">
+
+    <form action="{{ url_for('admin_upload') }}" method="post" enctype="multipart/form-data">
+      <label>Upload New CSV</label>
+      <div class="row">
+        <input type="file" name="file" accept=".csv">
+      </div>
+      <div class="row">
+        <button class="btn" type="submit">Replace</button>
+      </div>
+    </form>
+  </div>
+</body>
+</html>
